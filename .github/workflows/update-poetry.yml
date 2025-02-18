@@ -1,0 +1,69 @@
+name: Update Poetry Dependencies on Command
+
+on:
+  issue_comment:
+    types: [created]  # 새로운 댓글이 작성될 때 실행
+
+jobs:
+  update-poetry:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python and Poetry
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Extract Package Name if Comment is from BAEM1N
+        id: extract_package
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commentBody = context.payload.comment.body;
+            const commenter = context.payload.comment.user.login;
+            const issueBody = context.payload.issue.body;
+
+            // 관리자 확인
+            if (commenter !== "BAEM1N") {
+              console.log(`Unauthorized user: ${commenter}. Skipping package update.`);
+              return null;
+            }
+
+            // 코멘트가 "@bot add package"를 포함하는지 확인
+            if (!commentBody.includes("@bot add package")) {
+              console.log("Command not detected. Skipping...");
+              return null;
+            }
+
+            // "Package Name"에서 패키지 이름 추출
+            const packageNameMatch = issueBody.match(/Package Name\s*\n\s*(\S+)/);
+            if (packageNameMatch) {
+              return packageNameMatch[1].trim();
+            } else {
+              console.log("Package Name not found.");
+              return null;
+            }
+
+      - name: Add package to pyproject.toml
+        if: steps.extract_package.outputs.result != ''
+        run: |
+          PACKAGE_NAME="${{ steps.extract_package.outputs.result }}"
+          poetry add "$PACKAGE_NAME"
+
+      - name: Commit and push changes
+        if: steps.extract_package.outputs.result != ''
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml poetry.lock
+          git commit -m "Added ${{ steps.extract_package.outputs.result }} via package request by BAEM1N"
+          git push origin main
